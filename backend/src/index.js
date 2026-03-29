@@ -47,3 +47,9 @@ app.use('/api/projects', projectsRouter);
 
 const timecardRouter = require('./modules/timecard/timecard.router');
 app.use('/api/timecards', timecardRouter);
+
+const leaveRouter = require('./modules/leave/leave.router');
+app.use('/api/leave', leaveRouter);
+
+const financeRouter = require('./modules/finance/finance.router');
+app.use('/api/finance', financeRouter);
