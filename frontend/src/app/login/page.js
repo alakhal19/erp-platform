@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import api from '@/lib/api';
 
@@ -10,10 +10,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [exception, setException] = useState('');
+  const [showToast, setShowToast] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setException('');
+    setShowToast(false);
     setLoading(true);
 
     try {
@@ -21,10 +25,20 @@ export default function LoginPage() {
       login(res.data.token, res.data.user);
     } catch (err) {
       setError(err.response?.data?.error || 'Something went wrong');
+      setException(err.stack || JSON.stringify(err));
+      setShowToast(true);
     } finally {
       setLoading(false);
     }
   };
+
+  // Hide toast after 4 seconds
+  useEffect(() => {
+    if (showToast) {
+      const timer = setTimeout(() => setShowToast(false), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [showToast]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -48,6 +62,13 @@ export default function LoginPage() {
               {error}
             </div>
           )}
+          {/* Exception/Debug message */}
+          {exception && (
+            <div className="mb-4 px-4 py-3 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg text-xs break-all">
+              <strong>Debug info:</strong>
+              <pre className="whitespace-pre-wrap break-all">{exception}</pre>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
 
@@ -62,7 +83,9 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
                 required
+                autoComplete="username"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                spellCheck={false}
               />
             </div>
 
@@ -77,8 +100,16 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
+                autoComplete="current-password"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                spellCheck={false}
               />
+                      {/* Toast notification for errors */}
+                      {showToast && error && (
+                        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg text-sm animate-fade-in-out">
+                          {error}
+                        </div>
+                      )}
             </div>
 
             {/* Submit */}

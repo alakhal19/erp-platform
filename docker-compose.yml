@@ -2,7 +2,6 @@ version: '3.8'
 
 services:
 
-  # PostgreSQL database
   postgres:
     image: postgres:16-alpine
     container_name: erp_postgres
@@ -18,7 +17,6 @@ services:
     networks:
       - erp_network
 
-  # Backend API
   backend:
     build:
       context: ./backend
@@ -38,7 +36,6 @@ services:
     command: >
       sh -c "npx prisma migrate deploy && node src/index.js"
 
-  # Frontend
   frontend:
     build:
       context: ./frontend
@@ -48,7 +45,8 @@ services:
     depends_on:
       - backend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:5000/api
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api
+      BACKEND_URL: http://backend:5000
     ports:
       - "3000:3000"
     networks:
