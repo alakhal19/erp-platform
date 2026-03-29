@@ -1,0 +1,154 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/erp-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/erp-frontend
+
+jobs:
+
+  # ─── JOB 1: Run tests ─────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: erp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Generate Prisma client
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:testpass@localhost:5432/erp_test
+        run: npx prisma generate
+
+      - name: Run database migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:testpass@localhost:5432/erp_test
+        run: npx prisma migrate deploy
+
+      - name: Check backend starts
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:testpass@localhost:5432/erp_test
+          JWT_SECRET: test_secret_key
+          PORT: 5000
+        run: |
+          node src/index.js &
+          sleep 3
+          curl -f http://localhost:5000 || exit 1
+          kill %1
+
+  # ─── JOB 2: Build and push Docker images ──────────────────
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate version number
+        id: version
+        run: |
+          VERSION=$(date +'%Y%m%d')-$(echo ${{ github.sha }} | cut -c1-7)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          dockerfile: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          dockerfile: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ steps.version.outputs.version }}
+          build-args: |
+            BACKEND_URL=http://backend:5000
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── JOB 3: Notify Release Platform ───────────────────────
+  notify:
+    name: Notify Release Platform
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Send webhook to Release Platform
+        run: |
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.RELEASE_WEBHOOK_SECRET }}" \
+            -d '{
+              "version": "${{ needs.build.outputs.version }}",
+              "commit": "${{ github.sha }}",
+              "message": "${{ github.event.head_commit.message }}",
+              "author": "${{ github.event.head_commit.author.name }}",
+              "backendImage": "${{ env.BACKEND_IMAGE }}:${{ needs.build.outputs.version }}",
+              "frontendImage": "${{ env.FRONTEND_IMAGE }}:${{ needs.build.outputs.version }}",
+              "repository": "${{ github.repository }}"
+            }' \
+            ${{ secrets.RELEASE_PLATFORM_URL }}/api/releases/webhook || echo "Release platform not yet configured"
