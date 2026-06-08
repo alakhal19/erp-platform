@@ -125,7 +125,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          ERP Platform v1.1.2
+          ERP Platform v1.1.3
         </p>
       </div>
     </div>
